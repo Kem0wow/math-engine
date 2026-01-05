@@ -1,19 +1,6 @@
 import tkinter as tk
-from PIL import Image, ImageTk
-
-
-# ================= SOFT LIGHT THEME =================
-THEME = {
-    "menu_bg": "#ececec",
-    "panel_bg": "#f3f3f3",
-    "content_bg": "#fafafa",
-    "button_bg": "#e0e0e0",
-    "button_hover": "#d2d2d2",
-    "text": "#2b2b2b",
-    "subtext": "#5f5f5f",
-    "accent": "#3f8cff",
-    "border": "#cfcfcf"
-}
+from theme import THEME
+from buttons import CustomBtn
 
 
 class MainWindow(tk.Tk):
@@ -26,18 +13,26 @@ class MainWindow(tk.Tk):
         self.configure(bg=THEME["content_bg"])
 
         # ================= STATE =================
-        self.current_panel = None  # Track current panel to prevent refresh
+        self.current_panel = None
         self.algebra_entries = []
-        self.algebra_widgets = []  # Store widget references
-        self.algebra_canvas = None  # Store canvas reference for cleanup
+        self.algebra_entry_map = {}
+        self.algebra_widgets = []
+        self.algebra_canvas = None
+        self.mousewheel_bound = False
 
-        # ================= ROOT =================
+        # ================= UI SETUP =================
+        self._setup_ui()
+        self._setup_menu_buttons()
+        
+        self.home_panel()
+
+    def _setup_ui(self):
         self.container = tk.Frame(self, bg=THEME["content_bg"])
         self.container.pack(fill=tk.BOTH, expand=True)
 
-        # ================= MENU BAR =================
         self.menubar = tk.Frame(
-            self.container, width=90,
+            self.container,
+            width=90,
             bg=THEME["menu_bg"],
             highlightthickness=1,
             highlightbackground=THEME["border"]
@@ -45,9 +40,9 @@ class MainWindow(tk.Tk):
         self.menubar.pack(side="left", fill=tk.Y)
         self.menubar.pack_propagate(False)
 
-        # ================= PANEL BAR =================
         self.panelbar = tk.Frame(
-            self.container, width=400,
+            self.container,
+            width=400,
             bg=THEME["panel_bg"],
             highlightthickness=1,
             highlightbackground=THEME["border"]
@@ -55,27 +50,29 @@ class MainWindow(tk.Tk):
         self.panelbar.pack(side="left", fill=tk.Y)
         self.panelbar.pack_propagate(False)
 
-        # ================= CONTENT =================
         self.content = tk.Frame(self.container, bg=THEME["content_bg"])
         self.content.pack(side="left", fill=tk.BOTH, expand=True)
 
-        # ================= MENU BUTTONS =================
-        self.add_menu_button("./img/home.png", "Home", self.home_panel)
-        self.add_menu_button("./img/calc.png", "Algebra", self.algebra_panel)
-        self.add_menu_button("./img/shape.png", "Tools", self.tool_panel)
+    def _setup_menu_buttons(self):
+        CustomBtn.add_menu_button(self.menubar, "./img/home.png", "Home", self.home_panel)
+        CustomBtn.add_menu_button(self.menubar, "./img/calc.png", "Algebra", self.algebra_panel)
+        CustomBtn.add_menu_button(self.menubar, "./img/shape.png", "Tools", self.tool_panel)
+        CustomBtn.add_menu_button(self.menubar, "./img/settings.png", "Settings", self.settings_panel)
 
-        self.home_panel()
-
-    # ================= HELPERS =================
+    # ================= PANEL MANAGEMENT =================
 
     def clear_panel(self):
-        # Unbind mousewheel if canvas exists
-        if self.algebra_canvas:
+        if self.mousewheel_bound:
             self.unbind_all("<MouseWheel>")
+            self.mousewheel_bound = False
+        
+        if self.algebra_canvas:
             self.algebra_canvas = None
         
-        for w in self.panelbar.winfo_children():
-            w.destroy()
+        self.algebra_entry_map.clear()
+        
+        for widget in self.panelbar.winfo_children():
+            widget.destroy()
 
     def panel_title(self, text):
         tk.Label(
@@ -101,10 +98,11 @@ class MainWindow(tk.Tk):
 
     def home_panel(self):
         if self.current_panel == "home":
-            return  # Don't refresh if already on this panel
+            return
         
         self.current_panel = "home"
         self.clear_panel()
+        
         self.panel_title("Home")
         self.panel_text(
             "Welcome to MethEngine.\n\n"
@@ -113,58 +111,89 @@ class MainWindow(tk.Tk):
             "Designed to stay readable for long sessions."
         )
 
+    def settings_panel(self):
+        if self.current_panel == "settings":
+            return
+        
+        self.current_panel = "settings"
+        self.clear_panel()
+
+        self.panel_title("Settings")
+
+        grid = tk.Frame(self.panelbar, bg=THEME["panel_bg"])
+        grid.pack(padx=12, pady=10)
+
+        settings = [
+            ("./img/import.png", "Import", lambda: print("IMPORT")),
+            ("./img/export.png", "Export", lambda: print("EXPORT")),
+            ("./img/clear.png", "Clear All", lambda: print("CLEAR"))
+        ]
+
+        for i, (icon, name, cmd) in enumerate(settings):
+            r = i // 4
+            c = i % 4
+            CustomBtn.add_tool_button(grid, icon, name, cmd, r, c)
+
     def tool_panel(self):
         if self.current_panel == "tools":
-            return  # Don't refresh if already on this panel
-        
+            return
+
         self.current_panel = "tools"
         self.clear_panel()
+
         self.panel_title("Tools")
-        
+
         grid = tk.Frame(self.panelbar, bg=THEME["panel_bg"])
-        grid.pack(padx=24, pady=10)
-        
-        self.add_tool_button(grid, "./img/point.png", "Point", self.point_tool, 0, 0)
-        self.add_tool_button(grid, "./img/line.png", "Line", self.line_tool, 0, 1)
-        self.add_tool_button(grid, "./img/circle.png", "Circle", self.circle_tool, 0, 2)
-        self.add_tool_button(grid, "./img/triangle.png", "Triangle", self.triangle_tool, 0, 3)
+        grid.pack(padx=12, pady=10)
 
-    def point_tool(self):
-        print("Point activated")
+        tools = [
+            ("./img/move.png", "Move", self.move_tool),
+            ("./img/point.png", "Point", self.point_tool),
+            ("./img/line.png", "Line", self.line_tool),
+            ("./img/circle.png", "Circle", self.circle_tool),
+            ("./img/half-circle.png", "Half Circle", self.halfcircle_tool),
+            ("./img/triangle.png", "Triangle", self.triangle_tool),
+            ("./img/text.png", "Text", self.text_tool),
+            ("./img/erease.png", "Erease", self.text_tool)
+        ]
 
-    def line_tool(self):
-        print("Line activated")
-
-    def circle_tool(self):
-        print("Circle activated")
-
-    def triangle_tool(self):
-        print("Triangle activated")
+        for i, (icon, name, cmd) in enumerate(tools):
+            r = i // 4
+            c = i % 4
+            CustomBtn.add_tool_button(grid, icon, name, cmd, r, c)
 
     def algebra_panel(self):
         if self.current_panel == "algebra":
-            return  # Don't refresh if already on this panel
+            return
 
         self.current_panel = "algebra"
         self.clear_panel()
+        
         self.panel_title("Algebra")
         self.panel_text(
             "Create and manipulate algebraic expressions,\n"
             "visualize functions and variables."
         )
 
-        self.add_square_button(
+        CustomBtn.add_square_button(
             self.panelbar,
             "./img/plus.png",
             "New",
             self.add_algebra_entry
         ).pack(pady=10, padx=24)
 
-        # Create scrollable frame container
+        self._setup_algebra_scroll()
+        
+        self.algebra_widgets = []
+        for entry_text in self.algebra_entries:
+            self._create_algebra_entry(entry_text)
+
+        self.algebra_container.bind("<Button-1>", lambda e: self.focus())
+
+    def _setup_algebra_scroll(self):
         scroll_frame = tk.Frame(self.panelbar, bg=THEME["panel_bg"])
         scroll_frame.pack(fill=tk.BOTH, expand=True, padx=24, pady=(0, 10))
 
-        # Create canvas and scrollbar
         self.algebra_canvas = tk.Canvas(
             scroll_frame,
             bg=THEME["panel_bg"],
@@ -182,87 +211,43 @@ class MainWindow(tk.Tk):
             bg=THEME["panel_bg"]
         )
 
-        # Configure canvas scrolling
         self.algebra_container.bind(
             "<Configure>",
-            lambda e: self.algebra_canvas.configure(scrollregion=self.algebra_canvas.bbox("all"))
+            lambda e: self.algebra_canvas.configure(
+                scrollregion=self.algebra_canvas.bbox("all")
+            )
         )
 
-        canvas_window = self.algebra_canvas.create_window(
+        self.algebra_canvas.create_window(
             (0, 0), 
             window=self.algebra_container, 
             anchor="nw",
-            width=350  # Match the panel width minus padding
+            width=350
         )
 
         self.algebra_canvas.configure(yscrollcommand=scrollbar.set)
 
-        # Pack canvas and scrollbar
         self.algebra_canvas.pack(side="left", fill=tk.BOTH, expand=True)
         scrollbar.pack(side="right", fill=tk.Y)
 
-        # Mouse wheel scrolling
         def on_mousewheel(event):
             self.algebra_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
         
         self.bind_all("<MouseWheel>", on_mousewheel)
+        self.mousewheel_bound = True
 
-        # Restore existing entries
-        self.algebra_widgets = []
-        for entry_text in self.algebra_entries:
-            self.restore_algebra_entry(entry_text)
-
-        # Click empty area to unfocus
-        self.algebra_container.bind("<Button-1>", lambda e: self.focus())
-
-    # ================= ALGEBRA ENTRY =================
+    # ================= ALGEBRA ENTRY MANAGEMENT =================
 
     def add_algebra_entry(self):
-        wrapper = tk.Frame(
-            self.algebra_container,
-            bg=THEME["panel_bg"]
-        )
-        wrapper.pack(fill=tk.X, pady=4)
-
-        var = tk.StringVar()
-
-        entry = tk.Entry(
-            wrapper,
-            textvariable=var,
-            font=("Segoe UI", 11),
-            relief="solid",
-            bd=1
-        )
-        entry.pack(side="left", fill=tk.X, expand=True, ipady=4)
-
-        delete_btn = tk.Button(
-            wrapper,
-            text="✕",
-            font=("Segoe UI", 10),
-            width=3,
-            relief="flat",
-            bg=THEME["button_bg"],
-            command=lambda: self.delete_algebra_entry(wrapper, var)
-        )
-        delete_btn.pack(side="left", padx=6)
-
-        self.algebra_widgets.append((wrapper, var))
-
-        entry.bind("<Return>", lambda e: self.save_entry(var))
-        entry.bind("<FocusOut>", lambda e: self.save_entry(var))
-
+        wrapper, var, entry = self._create_algebra_entry("")
+        
         entry.focus_set()
         
-        # Scroll to bottom to show new entry
         self.algebra_canvas.update_idletasks()
         self.algebra_canvas.yview_moveto(1.0)
 
-    def restore_algebra_entry(self, text):
-        """Restore an existing algebra entry when returning to the panel"""
-        wrapper = tk.Frame(
-            self.algebra_container,
-            bg=THEME["panel_bg"]
-        )
+    def _create_algebra_entry(self, text=""):
+        wrapper = tk.Frame(self.algebra_container, bg=THEME["panel_bg"])
         wrapper.pack(fill=tk.X, pady=4)
 
         var = tk.StringVar(value=text)
@@ -275,6 +260,8 @@ class MainWindow(tk.Tk):
             bd=1
         )
         entry.pack(side="left", fill=tk.X, expand=True, ipady=4)
+        
+        self.algebra_entry_map[id(entry)] = text
 
         delete_btn = tk.Button(
             wrapper,
@@ -283,82 +270,85 @@ class MainWindow(tk.Tk):
             width=3,
             relief="flat",
             bg=THEME["button_bg"],
-            command=lambda: self.delete_algebra_entry(wrapper, var)
+            command=lambda: self.delete_algebra_entry(wrapper, entry)
         )
         delete_btn.pack(side="left", padx=6)
 
-        self.algebra_widgets.append((wrapper, var))
+        entry.bind("<Return>", lambda e: self.save_entry(entry))
+        entry.bind("<FocusOut>", lambda e: self.save_entry(entry))
 
-        entry.bind("<Return>", lambda e: self.save_entry(var))
-        entry.bind("<FocusOut>", lambda e: self.save_entry(var))
+        self.algebra_widgets.append((wrapper, entry))
+        
+        return wrapper, var, entry
 
-    def save_entry(self, var):
-        text = var.get().strip()
-        if text and text not in self.algebra_entries:
-            self.algebra_entries.append(text)
-            print("Saved:", text)
-            print("All algebra entries:", self.algebra_entries)
+    def save_entry(self, entry):
+        new_text = entry.get().strip()
+        entry_id = id(entry)
+        old_text = self.algebra_entry_map.get(entry_id, "")
+        
+        if not new_text:
+            return
+        
+        if new_text == old_text:
+            return
+        
+        if old_text and old_text in self.algebra_entries:
+            self.algebra_entries.remove(old_text)
+        
+        if new_text not in self.algebra_entries:
+            self.algebra_entries.append(new_text)
+            print(f"Saved: '{new_text}'")
+            print(f"All entries: {self.algebra_entries}")
+        
+        self.algebra_entry_map[entry_id] = new_text
 
-    def delete_algebra_entry(self, frame, var):
-        text = var.get().strip()
+    def delete_algebra_entry(self, frame, entry):
+        entry_id = id(entry)
+        text = self.algebra_entry_map.get(entry_id, "")
+        
         if text in self.algebra_entries:
             self.algebra_entries.remove(text)
-            print("Deleted:", text)
-            print("All algebra entries:", self.algebra_entries)
+            print(f"Deleted: '{text}'")
+            print(f"All entries: {self.algebra_entries}")
         
-        # Remove from widget list
-        self.algebra_widgets = [(w, v) for w, v in self.algebra_widgets if w != frame]
+        if entry_id in self.algebra_entry_map:
+            del self.algebra_entry_map[entry_id]
+        
+        self.algebra_widgets = [(w, e) for w, e in self.algebra_widgets if w != frame]
         frame.destroy()
 
-    # ================= BUTTONS =================
+    # ================= TOOL ACTIONS =================
 
-    def add_menu_button(self, icon_path, text, command):
-        self.add_square_button(
-            self.menubar, icon_path, text, command
-        ).pack(pady=10, padx=10)
+    def move_tool(self):
+        print("Move tool activated")
 
-    def add_tool_button(self, parent, icon_path, text, command, r, c):
-        btn = self.add_square_button(parent, icon_path, text, command)
-        btn.grid(row=r, column=c, padx=10, pady=10)
+    def point_tool(self):
+        print("Point tool activated")
 
-    def add_square_button(self, parent, icon_path, text, command):
-        box = tk.Frame(
-            parent,
-            width=70,
-            height=70,
-            bg=THEME["button_bg"],
-            cursor="hand2",
-            highlightthickness=1,
-            highlightbackground=THEME["border"]
-        )
-        box.pack_propagate(False)
+    def line_tool(self):
+        print("Line tool activated")
 
-        img = Image.open(icon_path).resize((26, 26))
-        icon = ImageTk.PhotoImage(img)
+    def circle_tool(self):
+        print("Circle tool activated")
+    
+    def halfcircle_tool(self):
+        print("Half Circle tool activated")
 
-        lbl_icon = tk.Label(box, image=icon, bg=THEME["button_bg"])
-        lbl_icon.image = icon
-        lbl_icon.pack(pady=(10, 2))
+    def triangle_tool(self):
+        print("Triangle tool activated")
 
-        lbl_text = tk.Label(
-            box,
-            text=text,
-            fg=THEME["text"],
-            bg=THEME["button_bg"],
-            font=("Segoe UI", 9)
-        )
-        lbl_text.pack()
+    def text_tool(self):
+        print("Text tool activated")
 
-        for w in (box, lbl_icon, lbl_text):
-            w.bind("<Button-1>", lambda e: command())
-            w.bind("<Enter>", lambda e, b=box: b.config(bg=THEME["button_hover"]))
-            w.bind("<Leave>", lambda e, b=box: b.config(bg=THEME["button_bg"]))
+    def erease_tool(self):
+        print("Erease tool activated")
 
-        return box
+    # ================= RUN =================
 
     def run(self):
         self.mainloop()
 
 
 if __name__ == "__main__":
-    MainWindow().run()
+    app = MainWindow()
+    app.run()
